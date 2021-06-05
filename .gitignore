@@ -161,3 +161,9 @@ real_time_skes.py
 
 # ignore 111.mp4
 111.mp4
+
+# PyCharm
+.idea/
+
+# ignore output
+output/
