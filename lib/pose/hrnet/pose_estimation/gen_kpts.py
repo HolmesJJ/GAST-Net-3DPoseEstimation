@@ -54,6 +54,10 @@ def parse_args():
                         help='The maximum number of estimated poses')
     parser.add_argument("-v", "--video", type=str, default='camera',
                         help="input video file name")
+    parser.add_argument('-t', '--toe', action='store_true',
+                        help='output toe')
+    parser.add_argument('-d', '--demo', action='store_true',
+                        help='output demo')
     args = parser.parse_args()
 
     return args
@@ -366,3 +370,76 @@ def round_list(input_list, decimals=3):
             input_list[i][j] = round(input_list[i][j], decimals)
 
     return input_list
+
+
+def load_2d_model(det_dim=416):
+    detect_args = parse_args()
+    reset_config(detect_args)
+
+    # Loading detector and pose model, initialize sort for track
+    human_model = yolo_model(inp_dim=det_dim)
+    pose_model = model_load(cfg)
+    people_sort = Sort()
+    return detect_args, human_model, pose_model, people_sort
+
+
+def gen_frame_kpts(detect_args, human_model, pose_model, people_sort, frame, det_dim=416):
+    kpts_result = []
+    scores_result = []
+    num_person = 1
+    try:
+        bboxs, scores = yolo_det(frame, human_model, reso=det_dim, confidence=detect_args.thred_score)
+
+        if bboxs is None or not bboxs.any():
+            print('No person detected!')
+            return None, None
+
+        # Using Sort to track people
+        people_track = people_sort.update(bboxs)
+
+        # Track the person in the video and remove the ID
+        if people_track.shape[0] == 1:
+            people_track_ = people_track[-1, :-1].reshape(1, 4)
+        else:
+            print("More than one person!")
+            return None, None
+
+        track_bboxs = []
+        for bbox in people_track_:
+            bbox = [round(i, 2) for i in list(bbox)]
+            track_bboxs.append(bbox)
+
+    except Exception as e:
+        print(e)
+        return None, None
+
+    with torch.no_grad():
+        # bbox is coordinate location
+        inputs, origin_img, center, scale = PreProcess(frame, track_bboxs, cfg, num_person)
+        inputs = inputs[:, [2, 1, 0]]
+
+        if torch.cuda.is_available():
+            inputs = inputs.cuda()
+        output = pose_model(inputs)
+
+        # compute coordinate
+        preds, maxvals = get_final_preds(cfg, output.clone().cpu().numpy(), np.asarray(center), np.asarray(scale))
+
+    kpts = np.zeros((num_person, 17, 2), dtype=np.float32)
+    scores = np.zeros((num_person, 17), dtype=np.float32)
+
+    for i, kpt in enumerate(preds):
+        kpts[i] = kpt
+
+    for i, score in enumerate(maxvals):
+        scores[i] = score.squeeze()
+
+    kpts_result.append(kpts)
+    scores_result.append(scores)
+
+    key_points = np.array(kpts_result)
+    scores = np.array(scores_result)
+
+    key_points = key_points.transpose(1, 0, 2, 3)  # (T, M, N, 2) --> (M, T, N, 2)
+    scores = scores.transpose(1, 0, 2)  # (T, M, N) --> (M, T, N)
+    return key_points, scores
