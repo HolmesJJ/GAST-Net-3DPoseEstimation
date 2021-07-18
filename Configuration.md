@@ -39,6 +39,12 @@ conda deactivate
 conda remove -n VideoPose3D --all
 ```
 
+6. 对于ubuntu 16
+```
+source ~/anaconda3/etc/profile.d/conda.sh
+conda activate VideoPose3D
+```
+
 ## 安装pip依赖库
 
 ### 安装pytorch
